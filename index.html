@@ -408,6 +408,62 @@ if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
   // Compass not required here, but in case you later add it, warn early.
   console.warn('Tip: use HTTPS for best sensor support on iOS.');
 }
+<!-- Put this button near your ARM button -->
+<div id="locWrap"><button id="locBtn">ENABLE LOCATION</button></div>
+<div id="geoMsg" style="margin-top:8px;font-size:12px;opacity:.8"></div>
+
+<script>
+const geoMsg = document.getElementById('geoMsg');
+const locWrap = document.getElementById('locWrap');
+const locBtn = document.getElementById('locBtn');
+
+function showMsg(t){ geoMsg.textContent = t; }
+
+function explain(err){
+  if(!err) return 'Unknown error';
+  if(err.code===1) return 'Permission denied — allow Location for this site (and Precise).';
+  if(err.code===2) return 'Position unavailable — step outside or wait for GPS lock.';
+  if(err.code===3) return 'Timeout — trying again…';
+  return err.message || 'Location error';
+}
+
+function onOK(pos){
+  locWrap.style.display='none';
+  showMsg('Location active.');
+  // call your existing onPosition(pos) here:
+  if (typeof onPosition === 'function') onPosition(pos);
+}
+
+function onErr(err){
+  showMsg('Location: ' + explain(err));
+  locWrap.style.display='block';
+}
+
+function requestOneShot(){
+  if(!navigator.geolocation){ showMsg('Geolocation not supported'); return; }
+  navigator.geolocation.getCurrentPosition(onOK, onErr, {
+    enableHighAccuracy: true, timeout: 15000, maximumAge: 0
+  });
+}
+
+// Try to start a watcher too (some devices prompt on watch)
+if('geolocation' in navigator){
+  navigator.geolocation.watchPosition(onOK, onErr, {
+    enableHighAccuracy: true, timeout: 15000, maximumAge: 1000
+  });
+}
+locBtn.addEventListener('click', requestOneShot);
+
+// Show state if supported
+if(navigator.permissions?.query){
+  navigator.permissions.query({name:'geolocation'}).then(s=>{
+    showMsg('Geolocation permission: ' + s.state);
+    s.onchange=()=>showMsg('Geolocation permission: ' + s.state);
+  }).catch(()=>{});
+}
+</script>
+
   </script>
 </body>
 </html>
+
