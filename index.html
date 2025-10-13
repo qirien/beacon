@@ -60,15 +60,12 @@ button:disabled{opacity:.6;cursor:not-allowed}
 </head>
 <body>
 
-<!-- ADMIN (map + ID link + download JSON) -->
+<!-- ADMIN (map + clean link) -->
 <div id="top">
-  <label>ID: <input id="idInput" type="text" placeholder="e.g. cache1" style="width:120px"></label>
   <label>Target: <input id="targetInput" type="text" placeholder="lat,lng" style="width:180px"></label>
   <label>Label: <input id="labelInput" type="text" placeholder="Optional label" style="width:160px"></label>
-  <button id="genIdBtn">Generate ID</button>
-  <button id="dropPin">Drop Pin</button>
+  <button id="dropPin" title="Tap map to fill coords">Drop Pin</button>
   <button id="createLink">Copy Clean Link</button>
-  <button id="downloadJson">Download targets.json</button>
   <span class="small">View: <button id="streetBtn">Street</button> <button id="satBtn">Satellite</button></span>
 </div>
 <div id="map"></div>
@@ -108,84 +105,74 @@ button:disabled{opacity:.6;cursor:not-allowed}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
-/* ---------- Utilities ---------- */
+/* ================== Simple obfuscation helpers (NOT crypto) ================== */
+const OBFUSCATION_SEED = "bantha-tracks"; // change this string to alter encoding
+function seedHash(s){let h=0;for(let i=0;i<s.length;i++)h=(h*131+s.charCodeAt(i))>>>0;return (h%9000)+1000;}
+const _k = seedHash(OBFUSCATION_SEED);
+const _SCALE = 1e5; // ~1m precision
+const _b36 = n => n.toString(36);
+const _u36 = s => parseInt(s,36);
+function encodeCoordsToken(lat,lng){
+  const a = Math.round((lat+90)*_SCALE), b = Math.round((lng+180)*_SCALE);
+  const a2=a+_k, b2=b+7*_k, chk=(a2+b2)%104729;
+  return `${_b36(a2)}-${_b36(b2)}-${_b36(chk)}`;
+}
+function decodeCoordsToken(token){
+  try{
+    const [sa,sb,sc]=token.split("-");
+    const a2=_u36(sa), b2=_u36(sb), chk=_u36(sc);
+    if(((a2+b2)%104729)!==chk) return null;
+    const a=a2-_k, b=b2-7*_k;
+    const lat=a/_SCALE-90, lng=b/_SCALE-180;
+    if(!Number.isFinite(lat)||!Number.isFinite(lng)) return null;
+    return {lat,lng};
+  }catch{return null;}
+}
+
+/* ================== Utilities & shared ================== */
 const $=id=>document.getElementById(id);
-const logBox=$('logBox'); const log=m=>{console.log('[Beacon]',m); logBox.textContent += m + '\\n';};
+const logBox=$('logBox'); const log=m=>{ if(logBox){ console.log('[Beacon]',m); logBox.textContent += m+'\\n'; } };
+
 const toRad=v=>v*Math.PI/180;
 const haversine=(a,b,c,d)=>{const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(c-a),dλ=toRad(d-b);
   const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2; return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s)); };
 
 const params=new URLSearchParams(location.search);
 const isAdmin=params.get('admin')==='1';
-const requestedId=params.get('id');
 
-/* ---------- Persistent target store (from targets.json) ---------- */
-let TARGETS = {}; // id -> {lat,lng,label}
-async function loadTargets(){
-  try{
-    // cache-bust to make updates visible
-    const res = await fetch('targets.json?cb=' + Date.now());
-    if(res.ok){ TARGETS = await res.json(); log('Loaded targets.json'); }
-    else { log('targets.json not found, starting with empty map'); TARGETS = {}; }
-  }catch(e){
-    log('Failed to load targets.json (' + (e.message||e) + '), using empty');
-    TARGETS = {};
-  }
-}
-function saveTargetsToDownload(){
-  const data = JSON.stringify(TARGETS, null, 2);
-  const blob = new Blob([data], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'targets.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
-  alert('Downloaded updated targets.json. Commit this file to your repo to persist new IDs.');
-}
-
-/* ---------- Admin setup ---------- */
-const topBar=$('top'),mapEl=$('map');
-let map,osm,esriSat,targetMarker;
-async function initAdmin(){
-  await loadTargets();
+/* ================== Admin (map + clean link) ================== */
+const topBar=$('top'),mapEl=$('map'); let map,osm,esriSat,targetMarker;
+function initAdmin(){
   topBar.classList.add('show'); mapEl.classList.add('show');
-
   osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
   esriSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
   map=L.map('map',{layers:[osm]}).setView([39,-98],4);
-
   $('streetBtn').onclick=()=>{ if(map.hasLayer(esriSat)) map.removeLayer(esriSat); osm.addTo(map); };
   $('satBtn').onclick=()=>{ if(map.hasLayer(osm)) map.removeLayer(osm); esriSat.addTo(map); };
-  $('genIdBtn').onclick=()=>{ $('idInput').value = genId(); };
-
-  map.on('click', e=>{
+  map.on('click',e=>{
     if(targetMarker) map.removeLayer(targetMarker);
     targetMarker = L.marker(e.latlng).addTo(map);
     $('targetInput').value = `${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;
   });
 
   $('createLink').onclick = async ()=>{
-    const id = ($('idInput').value || '').trim() || genId();
-    const t = $('targetInput').value.split(',');
-    if(t.length<2){ alert('Drop a pin or enter lat,lng'); return; }
-    const [latStr,lngStr] = t;
-    const lat = parseFloat(latStr), lng = parseFloat(lngStr);
+    const parts = $('targetInput').value.split(',');
+    if(parts.length<2){ alert('Drop a pin or enter lat,lng'); return; }
+    const lat=parseFloat(parts[0]), lng=parseFloat(parts[1]);
     if(!Number.isFinite(lat)||!Number.isFinite(lng)){ alert('Invalid coordinates'); return; }
-
     const label = $('labelInput').value || '';
-    if(TARGETS[id] && !confirm(`ID "${id}" already exists. Overwrite?`)) return;
+    const token = encodeCoordsToken(lat,lng);
 
-    TARGETS[id] = { lat, lng, label };
-    const u = new URL(location.href); u.search=''; u.searchParams.set('id', id);
+    const u=new URL(location.href); u.search='';
+    u.searchParams.set('t', token);
+    if(label) u.searchParams.set('label', label); // omit if you want stealthier links
+
     try{ await navigator.clipboard.writeText(u.toString()); alert('Clean link copied: ' + u.toString()); }
     catch{ prompt('Copy link:', u.toString()); }
   };
-
-  $('downloadJson').onclick = saveTargetsToDownload;
 }
-function genId(){ return Math.random().toString(36).slice(2,8); }
 
-/* ---------- Player (beacon) ---------- */
+/* ================== Player (beacon) ================== */
 const eye=$('eye'),tick=$('tick'),distanceDisplay=$('distanceDisplay'),geoMsg=$('geoMsg'),aux=$('aux');
 const locBtn=$('locBtn'),armBtn=$('armBtn'),testBeepBtn=$('testBeepBtn'),muteBtn=$('muteBtn');
 const hapticsOnlyEl=$('hapticsOnly'),flashOnBeepEl=$('flashOnBeep');
@@ -209,9 +196,35 @@ function sweep(rps){ if(sweep._rps===rps) return; sweep._rps=rps; cancelAnimatio
 ['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{ await unlockAudio(); pip(740,120); }, {passive:true}));
 ['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{ muted=!muted; muteBtn.textContent=muted?'UNMUTE':'MUTE'; }, {passive:true}));
 
-/* ---------- Geolocation ---------- */
-let ACTIVE_TARGET = null; // {lat,lng,label} resolved from id or URL
-function explainGeo(err){ if(!err) return 'Unknown error'; if(err.code===1) return 'Permission denied — Allow & Precise ON in Safari.'; if(err.code===2) return 'Position unavailable — try outdoors.'; if(err.code===3) return 'Timeout — press ENABLE again.'; return err.message||'Location error'; }
+/* ================== Geolocation + target resolution ================== */
+let ACTIVE_TARGET = null;
+
+async function resolveTargetFromLink(){
+  const qs = new URLSearchParams(location.search);
+
+  // Preferred: obfuscated token
+  if (qs.has('t')) {
+    const d = decodeCoordsToken(qs.get('t'));
+    if (d) { ACTIVE_TARGET = { ...d, label: qs.get('label') || '' }; return; }
+  }
+
+  // Fallback for testing/back-compat: explicit lat/lng
+  if (qs.has('lat') && qs.has('lng')) {
+    ACTIVE_TARGET = {
+      lat: parseFloat(qs.get('lat')),
+      lng: parseFloat(qs.get('lng')),
+      label: qs.get('label') || ''
+    };
+  }
+}
+
+function explainGeo(err){
+  if(!err) return 'Unknown error';
+  if(err.code===1) return 'Permission denied — Allow & Precise ON in Safari.';
+  if(err.code===2) return 'Position unavailable — try outdoors.';
+  if(err.code===3) return 'Timeout — press ENABLE again.';
+  return err.message||'Location error';
+}
 function onGeoOK(pos){
   geoMsg.textContent='Location active.'; locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
   if(!ACTIVE_TARGET){ distanceDisplay.textContent='(No target)'; return; }
@@ -225,28 +238,20 @@ function requestOnce(){ if(!navigator.geolocation){ geoMsg.textContent='Geolocat
 function startWatch(){ if(!navigator.geolocation) return; navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:20000,maximumAge:2000}); }
 ['click','touchend'].forEach(ev=>$('locBtn').addEventListener(ev, requestOnce, {passive:true}));
 
-/* ---------- Boot ---------- */
-if(location.protocol!=='https:'&&location.hostname!=='localhost'){ geoMsg.textContent='⚠️ Use https:// for iOS location.'; }
+/* ================== Boot ================== */
+if(location.protocol!=='https:'&&location.hostname!=='localhost'){ $('geoMsg').textContent='⚠️ Use https:// for iOS location.'; }
 
 (async function boot(){
-  if(isAdmin){ await initAdmin(); return; }
+  if(isAdmin){ initAdmin(); return; }
 
-  await loadTargets();
+  await resolveTargetFromLink();
 
-  // Resolve target: prefer ?id=..., fallback to explicit lat/lng (for testing)
-  if(requestedId && TARGETS[requestedId]){
-    ACTIVE_TARGET = TARGETS[requestedId];
-  }else if(params.has('lat') && params.has('lng')){
-    ACTIVE_TARGET = { lat: parseFloat(params.get('lat')), lng: parseFloat(params.get('lng')), label: params.get('label')||'' };
-  }else{
-    geoMsg.textContent = 'No target ID in link.';
+  if (ACTIVE_TARGET) {
+    $('labelDisplay').textContent = ACTIVE_TARGET.label || 'Beacon';
+    startWatch();
+  } else {
+    $('geoMsg').textContent = 'No valid target in link.';
   }
-
-  if(ACTIVE_TARGET){
-    $('labelDisplay').textContent = ACTIVE_TARGET.label || requestedId || 'Beacon';
-  }
-
-  startWatch();
 })();
 })();
 </script>
