@@ -103,45 +103,51 @@ button:disabled{opacity:.6;cursor:not-allowed}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
-/* ---------- Utilities ---------- */
+/* ---------- utils ---------- */
 const $=id=>document.getElementById(id);
-const logBox=$('logBox');const log=m=>{console.log('[Beacon]',m);logBox.textContent+=m+'\\n';};
 const toRad=v=>v*Math.PI/180;
 const haversine=(a,b,c,d)=>{const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(c-a),dλ=toRad(d-b);
   const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));};
-
-/* ---------- Mode detect ---------- */
 const params=new URLSearchParams(location.search);
 const isAdmin=params.get('admin')==='1';
 const target=(()=>{const lat=parseFloat(params.get('lat')),lng=parseFloat(params.get('lng')),label=params.get('label')||'';return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng,label}:null;})();
 
-/* ---------- Admin setup ---------- */
-const topBar=$('top'),mapEl=$('map');let map,osm,esriSat,targetMarker;
+/* ---------- admin (unchanged minimal) ---------- */
+const topBar=document.getElementById('top'),mapEl=document.getElementById('map');
+let map,osm,esriSat,targetMarker;
 if(isAdmin){
-  topBar.classList.add('show');mapEl.classList.add('show');
+  topBar.classList.add('show'); mapEl.classList.add('show');
   osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
   esriSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
   map=L.map('map',{layers:[osm]}).setView([39,-98],4);
-  $('streetBtn').onclick=()=>{if(map.hasLayer(esriSat))map.removeLayer(esriSat);osm.addTo(map)};
-  $('satBtn').onclick=()=>{if(map.hasLayer(osm))map.removeLayer(osm);esriSat.addTo(map)};
+  document.getElementById('streetBtn').onclick=()=>{if(map.hasLayer(esriSat))map.removeLayer(esriSat);osm.addTo(map)};
+  document.getElementById('satBtn').onclick=()=>{if(map.hasLayer(osm))map.removeLayer(osm);esriSat.addTo(map)};
   map.on('click',e=>{if(targetMarker)map.removeLayer(targetMarker);targetMarker=L.marker(e.latlng).addTo(map);
-                     $('targetInput').value=`${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;});
-  $('createLink').onclick=async()=>{
-    const t=$('targetInput').value.split(',');
-    if(t.length<2){alert('Drop a pin or enter lat,lng');return;}
-    const [lat,lng]=t;const label=$('labelInput').value;
-    const u=new URL(location.href);u.search='';u.searchParams.set('lat',lat);u.searchParams.set('lng',lng);if(label)u.searchParams.set('label',label);
-    try{await navigator.clipboard.writeText(u);alert('Link copied!');}catch{prompt('Copy link:',u);}
+    document.getElementById('targetInput').value=`${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;});
+  document.getElementById('createLink').onclick=async()=>{
+    const v=document.getElementById('targetInput').value.split(',');
+    if(v.length<2){alert('Drop a pin or enter lat,lng');return;}
+    const [lat,lng]=v, label=document.getElementById('labelInput').value;
+    const u=new URL(location.href); u.search=''; u.searchParams.set('lat',lat); u.searchParams.set('lng',lng); if(label) u.searchParams.set('label',label);
+    try{await navigator.clipboard.writeText(u);}catch{prompt('Copy link:',u);}
+    alert('Link ready to share.');
   };
 }
 
-/* ---------- Player wiring ---------- */
+/* ---------- player elements ---------- */
 const eye=$('eye'),tick=$('tick'),distanceDisplay=$('distanceDisplay'),geoMsg=$('geoMsg'),aux=$('aux');
-const locBtn=$('locBtn'),armBtn=$('armBtn'),testBeepBtn=$('testBeepBtn'),muteBtn=$('muteBtn');
-if(target){$('labelDisplay').textContent=target.label||'Beacon';}
-if(location.protocol!=='https:'&&location.hostname!=='localhost'){geoMsg.textContent='⚠️ Use https:// for iOS location.';}
+const locBtn=$('locBtn'),armBtn=$('armBtn');
+const testBeepBtn=$('testBeepBtn')||document.getElementById('testBeepBtn'); // if you kept it
+const muteBtn=$('muteBtn')||document.getElementById('muteBtn');
 
-/* ---------- Audio (robust iOS unlock) ---------- */
+/* add two simple toggles under your controls if you want:
+   <label><input type="checkbox" id="hapticsOnly"> Haptics mode</label>
+   <label><input type="checkbox" id="flashOnBeep" checked> Flash on beep</label>
+*/
+let hapticsOnlyEl = document.getElementById('hapticsOnly');
+let flashOnBeepEl = document.getElementById('flashOnBeep');
+
+/* ---------- audio with iOS-safe unlock ---------- */
 let audioCtx=null,gainNode=null,armed=false,beepTimer=null,sweepRAF=null,muted=false;
 function ensureAudio(){
   if(audioCtx) return;
@@ -151,20 +157,33 @@ function ensureAudio(){
 async function unlockAudio(){
   ensureAudio();
   try{await audioCtx.resume();}catch{}
-  // short silent “tickle” to fully unlock output path on iOS
-  const now=audioCtx.currentTime;
-  const o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(440,now);
-  const g=audioCtx.createGain(); g.gain.value=0.0001; // nearly silent
-  o.connect(g); g.connect(audioCtx.destination);
+  // tiny near-silent burst to open the path
+  const now=audioCtx.currentTime, o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(440,now); g.gain.value=0.0001; o.connect(g); g.connect(audioCtx.destination);
   o.start(now); o.stop(now+0.05);
 }
+function screenFlash(){
+  if(!(flashOnBeepEl?.checked)) return;
+  eye.classList.add('flash');
+  setTimeout(()=>eye.classList.remove('flash'),120);
+}
 function pip(freq=800,ms=90){
-  if(!audioCtx||muted) return;
-  const now=audioCtx.currentTime; const o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
-  const g=gainNode.gain; g.cancelScheduledValues(now); g.setValueAtTime(0.0001,now);
-  g.linearRampToValueAtTime(0.35,now+0.015); g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
+  // If user enabled haptics-only or the phone is muted, vibrate + flash only
+  if(hapticsOnlyEl?.checked){ navigator.vibrate?.(20); screenFlash(); return; }
+  if(muted) { navigator.vibrate?.(20); screenFlash(); return; }
+
+  if(!audioCtx){return;}
+  const now=audioCtx.currentTime;
+  const o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
+  const g=gainNode.gain;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(0.0001,now);
+  g.linearRampToValueAtTime(0.4,now+0.015);
+  g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
   o.start(now); o.stop(now+ms/1000+.05);
+
   navigator.vibrate?.(12);
+  screenFlash();
 }
 function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620};
   if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
@@ -172,38 +191,33 @@ function schedule(it,f){
   if(schedule._it===it) return;
   schedule._it=it;
   clearInterval(beepTimer);
-  pip(f); // immediate confirmation
+  pip(f);
   beepTimer=setInterval(()=>pip(f),Math.max(120,it));
 }
 function sweep(rps){
   if(sweep._rps===rps) return;
   sweep._rps=rps; cancelAnimationFrame(sweepRAF);
-  let start=null;
-  function step(t){ if(!start) start=t; const e=(t-start)/1000; tick.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); }
+  let start=null; function step(t){ if(!start) start=t; const e=(t-start)/1000; tick.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); }
   sweepRAF=requestAnimationFrame(step);
 }
 
-/* Buttons */
-['click','touchend'].forEach(ev=>armBtn.addEventListener(ev, async ()=>{
+/* ---------- buttons ---------- */
+['click','touchend'].forEach(ev=>armBtn?.addEventListener(ev, async ()=>{
   await unlockAudio();
   armed=true;
   armBtn.disabled=true; armBtn.textContent='ARMED';
   aux.textContent='Tracking active.';
-  // Audible confirmation
-  pip(880,120);
+  pip(880,120); // confirmation
 },{passive:true}));
 
-['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{
-  await unlockAudio();
-  pip(740,120);
-},{passive:true}));
+if(testBeepBtn){
+  ['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{ await unlockAudio(); pip(740,120); }, {passive:true}));
+}
+if(muteBtn){
+  ['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{ muted=!muted; muteBtn.textContent=muted?'UNMUTE':'MUTE'; }, {passive:true}));
+}
 
-['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{
-  muted=!muted;
-  muteBtn.textContent = muted ? 'UNMUTE' : 'MUTE';
-},{passive:true}));
-
-/* ---------- Geolocation (no overlays) ---------- */
+/* ---------- geolocation ---------- */
 let watchId=null;
 function explainGeo(err){
   if(!err) return 'Unknown error';
@@ -213,12 +227,12 @@ function explainGeo(err){
   return err.message||'Location error';
 }
 function onGeoOK(pos){
-  geoMsg.textContent='Location active.';
-  locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
-  const {latitude,longitude,accuracy}=pos.coords;
-  if(!target){ distanceDisplay.textContent='(No target in URL)'; return; }
+  const {latitude,longitude}=pos.coords;
+  document.getElementById('geoMsg').textContent='Location active.';
+  const locBtn=document.getElementById('locBtn'); if(locBtn){locBtn.disabled=true;locBtn.textContent='LOCATION ENABLED';}
+  if(!target){ document.getElementById('distanceDisplay').textContent='(No target in URL)'; return; }
   const d=haversine(latitude,longitude,target.lat,target.lng);
-  distanceDisplay.textContent = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
+  document.getElementById('distanceDisplay').textContent = d<1000?`${Math.round(d)} m`:`${(d/1000).toFixed(2)} km`;
   const {it,f}=cadence(d);
   eye.style.animationDuration=Math.max(0.3,it/900)+'s';
   sweep(Math.max(0.8,3000/it));
@@ -226,11 +240,12 @@ function onGeoOK(pos){
   if(d<=6){ eye.style.filter='brightness(2)'; navigator.vibrate?.([20,60,20,60]); }
 }
 function onGeoErr(err){
-  geoMsg.textContent = explainGeo(err);
-  locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION';
+  const locBtn=document.getElementById('locBtn');
+  document.getElementById('geoMsg').textContent = explainGeo(err);
+  if(locBtn){locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION';}
 }
 function requestOnce(){
-  if(!navigator.geolocation){ geoMsg.textContent='Geolocation not supported'; return; }
+  if(!navigator.geolocation){ document.getElementById('geoMsg').textContent='Geolocation not supported'; return; }
   navigator.geolocation.getCurrentPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:0});
 }
 function startWatch(){
@@ -238,10 +253,20 @@ function startWatch(){
   if(watchId!==null) return;
   watchId = navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:20000,maximumAge:2000});
 }
-['click','touchend'].forEach(ev=>$('locBtn').addEventListener(ev, requestOnce, {passive:true}));
+['click','touchend'].forEach(ev=>document.getElementById('locBtn')?.addEventListener(ev, requestOnce, {passive:true}));
 startWatch();
+
+/* ---------- UX reminders ---------- */
+if(!isAdmin && target){ document.getElementById('labelDisplay').textContent = target.label || 'Beacon'; }
+if(location.protocol!=='https:'&&location.hostname!=='localhost'){ document.getElementById('geoMsg').textContent='⚠️ Use https:// for iOS location.'; }
+
+/* Optional CSS pulse for flash */
+const style=document.createElement('style');
+style.textContent=`.flash{filter:brightness(2)!important; box-shadow:0 0 60px rgba(255,60,60,.7),0 0 140px rgba(255,40,40,.45)!important}`;
+document.head.appendChild(style);
 
 })();
 </script>
 </body>
 </html>
+
