@@ -222,6 +222,78 @@ function updateFromPosition(pos){
 
 /* ---------- Show player/admin surfaces ---------- */
 if(!isAdmin){ beaconWrap.classList.add('show'); }
+<script>
+/* ================= FIXED LOCATION HANDLING ================= */
+
+const locBtn = document.getElementById('locBtn');
+const geoMsg = document.getElementById('geoMsg');
+const distanceDisplay = document.getElementById('distanceDisplay');
+const aux = document.getElementById('aux');
+
+function logStatus(msg) {
+  geoMsg.textContent = msg;
+  console.log('[Beacon]', msg);
+}
+
+// Called when we get a location
+function onGeoSuccess(pos) {
+  const { latitude, longitude, accuracy } = pos.coords;
+  logStatus(`Got position: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} ±${Math.round(accuracy)}m`);
+  locBtn.disabled = true;
+  locBtn.textContent = "LOCATION ENABLED";
+  aux.textContent = "Tap ARM / START to begin beacon tracking.";
+  // If your app has an onPosition function, call it
+  if (typeof onPosition === "function") onPosition(pos);
+}
+
+// Called when location fails
+function onGeoError(err) {
+  let reason = "Unknown error";
+  if (err.code === 1) reason = "Permission denied — enable Location (and Precise).";
+  if (err.code === 2) reason = "Position unavailable — try outside.";
+  if (err.code === 3) reason = "Timeout — trying again.";
+  logStatus("Location error: " + reason);
+  locBtn.disabled = false;
+  locBtn.textContent = "ENABLE LOCATION";
+}
+
+// Works with iOS (must be inside user gesture)
+async function requestLocation() {
+  logStatus("Requesting location access...");
+  if (!navigator.geolocation) {
+    logStatus("Geolocation not supported on this browser.");
+    return;
+  }
+  try {
+    navigator.geolocation.getCurrentPosition(onGeoSuccess, onGeoError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  } catch (e) {
+    logStatus("Geolocation exception: " + e.message);
+  }
+}
+
+// Attach both click and touch for reliability
+["click", "touchend"].forEach(ev =>
+  locBtn.addEventListener(ev, requestLocation, { passive: true })
+);
+
+// Automatic watcher (updates position after permission granted)
+if ("geolocation" in navigator) {
+  navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, {
+    enableHighAccuracy: true,
+    timeout: 20000,
+    maximumAge: 2000
+  });
+}
+
+// Warn if not HTTPS
+if (location.protocol !== "https:" && location.hostname !== "localhost") {
+  logStatus("⚠️ iOS requires HTTPS for geolocation. Use https:// (GitHub Pages / Netlify).");
+}
 </script>
 </body>
 </html>
+
