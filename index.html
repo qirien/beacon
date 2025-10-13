@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>LARP Beacon</title>
+<title>GCW Tracking Beacon</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
 :root{--bg:#0b0e12;--rim:#1d2530;--text:#e5e7eb;--muted:#9aa3af}
@@ -53,9 +53,6 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .row{display:flex;gap:8px;width:100%}
 .row .btn{flex:1}
 .log{margin-top:6px;font-size:12px;opacity:.75;white-space:pre-wrap;text-align:left;width:100%;max-height:110px;overflow:auto}
-
-/* Optional flash effect */
-.flash{filter:brightness(2)!important; box-shadow:0 0 60px rgba(255,60,60,.7),0 0 140px rgba(255,40,40,.45)!important}
 </style>
 </head>
 <body>
@@ -65,7 +62,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
   <label>Target: <input id="targetInput" type="text" placeholder="lat,lng" style="width:180px"></label>
   <label>Label: <input id="labelInput" type="text" placeholder="Optional label" style="width:160px"></label>
   <button id="dropPin" title="Tap map to fill coords">Drop Pin</button>
-  <button id="createLink">Copy Clean Link</button>
+  <button id="createLink">Copy Link</button>
   <span class="small">View: <button id="streetBtn">Street</button> <button id="satBtn">Satellite</button></span>
 </div>
 <div id="map"></div>
@@ -79,7 +76,6 @@ button:disabled{opacity:.6;cursor:not-allowed}
       <div class="tick" id="tick"></div>
       <div class="panel">
         <div class="label" id="labelDisplay">Beacon</div>
-        <div class="readout" id="distanceDisplay">—</div>
         <div class="tiny" id="aux">Tap ENABLE LOCATION, then ARM for audio.</div>
         <div class="tiny" id="geoMsg"></div>
       </div>
@@ -92,11 +88,6 @@ button:disabled{opacity:.6;cursor:not-allowed}
     </div>
     <div class="row">
       <button class="btn" id="testBeepBtn">TEST BEEP</button>
-      <button class="btn" id="muteBtn">MUTE</button>
-    </div>
-    <div class="row">
-      <label class="small"><input type="checkbox" id="hapticsOnly"> Haptics only</label>
-      <label class="small"><input type="checkbox" id="flashOnBeep" checked> Flash on beep</label>
     </div>
     <div class="log" id="logBox"></div>
   </div>
@@ -140,7 +131,7 @@ const haversine=(a,b,c,d)=>{const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(
 const params=new URLSearchParams(location.search);
 const isAdmin=params.get('admin')==='1';
 
-/* ================== Admin (map + clean link) ================== */
+/* ================== Admin (map + link) ================== */
 const topBar=$('top'),mapEl=$('map'); let map,osm,esriSat,targetMarker;
 function initAdmin(){
   topBar.classList.add('show'); mapEl.classList.add('show');
@@ -165,28 +156,25 @@ function initAdmin(){
 
     const u=new URL(location.href); u.search='';
     u.searchParams.set('t', token);
-    if(label) u.searchParams.set('label', label); // omit if you want stealthier links
+    if(label) u.searchParams.set('label', label); // optional label in URL
 
-    try{ await navigator.clipboard.writeText(u.toString()); alert('Clean link copied: ' + u.toString()); }
+    try{ await navigator.clipboard.writeText(u.toString()); alert('Link copied: ' + u.toString()); }
     catch{ prompt('Copy link:', u.toString()); }
   };
 }
 
 /* ================== Player (beacon) ================== */
-const eye=$('eye'),tick=$('tick'),distanceDisplay=$('distanceDisplay'),geoMsg=$('geoMsg'),aux=$('aux');
-const locBtn=$('locBtn'),armBtn=$('armBtn'),testBeepBtn=$('testBeepBtn'),muteBtn=$('muteBtn');
-const hapticsOnlyEl=$('hapticsOnly'),flashOnBeepEl=$('flashOnBeep');
+const eye=$('eye'),tick=$('tick'),geoMsg=$('geoMsg'),aux=$('aux');
+const locBtn=$('locBtn'),armBtn=$('armBtn'),testBeepBtn=$('testBeepBtn');
 
-let audioCtx=null,gainNode=null,armed=false,beepTimer=null,sweepRAF=null,muted=false;
+let audioCtx=null,gainNode=null,armed=false,beepTimer=null,sweepRAF=null;
 function ensureAudio(){ if(audioCtx) return; audioCtx=new (window.AudioContext||window.webkitAudioContext)(); gainNode=audioCtx.createGain(); gainNode.gain.value=0.0001; gainNode.connect(audioCtx.destination); }
 async function unlockAudio(){ ensureAudio(); try{await audioCtx.resume();}catch{} const now=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.type='sine'; o.frequency.setValueAtTime(440,now); g.gain.value=0.0001; o.connect(g); g.connect(audioCtx.destination); o.start(now); o.stop(now+0.05); }
-function screenFlash(){ if(!(flashOnBeepEl?.checked)) return; eye.classList.add('flash'); setTimeout(()=>eye.classList.remove('flash'),120); }
 function pip(freq=800,ms=90){
-  if(hapticsOnlyEl?.checked || muted){ navigator.vibrate?.(20); screenFlash(); return; }
   if(!audioCtx) return;
   const now=audioCtx.currentTime, o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
   const g=gainNode.gain; g.cancelScheduledValues(now); g.setValueAtTime(0.0001,now); g.linearRampToValueAtTime(0.4,now+0.015); g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
-  o.start(now); o.stop(now+ms/1000+.05); navigator.vibrate?.(12); screenFlash();
+  o.start(now); o.stop(now+ms/1000+.05); navigator.vibrate?.(12);
 }
 function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620}; if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
 function schedule(it,f){ if(schedule._it===it) return; schedule._it=it; clearInterval(beepTimer); pip(f); beepTimer=setInterval(()=>pip(f),Math.max(120,it)); }
@@ -194,7 +182,6 @@ function sweep(rps){ if(sweep._rps===rps) return; sweep._rps=rps; cancelAnimatio
 
 ['click','touchend'].forEach(ev=>armBtn.addEventListener(ev, async ()=>{ await unlockAudio(); armed=true; armBtn.disabled=true; armBtn.textContent='ARMED'; aux.textContent='Tracking active.'; pip(880,120); }, {passive:true}));
 ['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{ await unlockAudio(); pip(740,120); }, {passive:true}));
-['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{ muted=!muted; muteBtn.textContent=muted?'UNMUTE':'MUTE'; }, {passive:true}));
 
 /* ================== Geolocation + target resolution ================== */
 let ACTIVE_TARGET = null;
@@ -226,14 +213,15 @@ function explainGeo(err){
   return err.message||'Location error';
 }
 function onGeoOK(pos){
-  geoMsg.textContent='Location active.'; locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
-  if(!ACTIVE_TARGET){ distanceDisplay.textContent='(No target)'; return; }
-  const {latitude,longitude}=pos.coords; const d=haversine(latitude,longitude,ACTIVE_TARGET.lat,ACTIVE_TARGET.lng);
-  distanceDisplay.textContent = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
+  geoMsg.textContent='Location active.';
+  const {latitude,longitude}=pos.coords;
+  if(!ACTIVE_TARGET){ aux.textContent='(No target in link)'; return; }
+  const d=haversine(latitude,longitude,ACTIVE_TARGET.lat,ACTIVE_TARGET.lng);
+  // distance is used internally for cadence/beeps but NOT displayed
   const {it,f}=cadence(d); eye.style.animationDuration=Math.max(0.3,it/900)+'s'; sweep(Math.max(0.8,3000/it)); if(armed) schedule(it,f);
   if(d<=6){ eye.style.filter='brightness(2)'; navigator.vibrate?.([20,60,20,60]); }
 }
-function onGeoErr(err){ geoMsg.textContent = explainGeo(err); locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION'; }
+function onGeoErr(err){ geoMsg.textContent = explainGeo(err); $('locBtn').disabled=false; $('locBtn').textContent='ENABLE LOCATION'; }
 function requestOnce(){ if(!navigator.geolocation){ geoMsg.textContent='Geolocation not supported'; return; } navigator.geolocation.getCurrentPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:0}); }
 function startWatch(){ if(!navigator.geolocation) return; navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:20000,maximumAge:2000}); }
 ['click','touchend'].forEach(ev=>$('locBtn').addEventListener(ev, requestOnce, {passive:true}));
