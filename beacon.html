@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>LARP Beacon</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{
+    --bg:#0b0e12;
+    --panel:#11151b;
+    --rim:#1d2530;
+    --accent:#c33;
+    --text:#e5e7eb;
+    --muted:#9aa3af;
+  }
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  /* Top bar (only shown in admin mode) */
+  #top { display:none; padding:8px; gap:8px; align-items:center; background:#0f141b; border-bottom:1px solid #1f2a38; }
+  #top.show { display:flex; flex-wrap:wrap; }
+  input[type="text"]{padding:8px 10px;border:1px solid #39495e;background:#0b1118;color:var(--text);border-radius:8px}
+  button{padding:10px 12px;border-radius:10px;border:1px solid #374151;background:#131a22;color:var(--text)}
+  button:disabled{opacity:.6}
+  #map { display:none; height:calc(100vh - 56px); }
+  #map.show { display:block; }
+
+  /* Beacon mode layout */
+  #beaconWrap{display:none; height:100vh; padding:22px; box-sizing:border-box; display:flex; align-items:center; justify-content:center;}
+  #beaconWrap.show{display:flex}
+  .beacon{
+    width:min(86vw,520px); aspect-ratio:1/1; position:relative;
+    background:radial-gradient(ellipse at 50% 45%, #0f151e 0%, #0b0e12 55%, #070a0d 100%);
+    border-radius:50%;
+    box-shadow:inset 0 0 40px rgba(0,0,0,.8), 0 10px 40px rgba(0,0,0,.4);
+    border:10px solid var(--rim);
+  }
+  /* decorative concentric rings */
+  .ring{position:absolute; inset:6%; border-radius:50%; border:2px solid #1a2230; box-shadow:inset 0 0 20px rgba(0,0,0,.6)}
+  .ring.r2{inset:16%}
+  .ring.r3{inset:26%}
+  .ring.r4{inset:36%}
+
+  /* red “eye” */
+  .eye{
+    position:absolute; left:50%; top:42%; transform:translate(-50%,-50%);
+    width:34%; aspect-ratio:1/1; border-radius:50%;
+    background:radial-gradient(circle at 50% 45%, #ff6b6b 0%, #e31616 35%, #7a0d0d 75%, #2a0707 100%);
+    box-shadow:0 0 40px rgba(255,60,60,.45), 0 0 120px rgba(255,40,40,.25);
+    animation:pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%, 70% { filter:brightness(1) }
+    100%    { filter:brightness(1.6) }
+  }
+
+  /* progress “radar” sweep tick */
+  .tick{
+    position:absolute; left:50%; top:42%; transform-origin:50% 50%; transform:translate(-50%,-50%) rotate(0deg);
+    width:40%; height:2px; background:linear-gradient(90deg, rgba(255,60,60,0.0) 0%, rgba(255,60,60,0.6) 100%);
+    border-radius:2px; filter:blur(.2px); opacity:.8;
+  }
+
+  /* status text panel */
+  .panel{
+    position:absolute; left:50%; bottom:6%; transform:translateX(-50%);
+    width:74%; padding:12px 14px; border-radius:12px;
+    background:linear-gradient(180deg, #0f141b, #0b0f15);
+    border:1px solid #1c2532; text-align:center; font-variant-numeric:tabular-nums;
+    box-shadow:0 6px 24px rgba(0,0,0,.35), inset 0 0 30px rgba(0,0,0,.25);
+  }
+  .label{font-size:14px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase}
+  .readout{margin-top:6px; font-size:28px}
+  .tiny{font-size:12px; color:#8a93a1; margin-top:4px}
+
+  /* big arm button shown before audio starts */
+  .armWrap{
+    position:absolute; inset:auto 0 16px 0; display:flex; justify-content:center;
+  }
+  .arm { padding:14px 18px; font-size:16px; border-radius:999px; border:1px solid #3a4a5f; background:#101822; color:#dbe2ea }
+  .arm.glow{ box-shadow:0 0 16px rgba(255,60,60,.35); border-color:#9b2b2b; background:#1a0f12 }
+
+  /* simple helper for hidden */
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+  <!-- ADMIN (organizer) BAR -->
+  <div id="top">
+    <label>Target: <input id="targetInput" type="text" placeholder="lat,lng or drop pin" style="width:220px"></label>
+    <label>Label: <input id="labelInput" type="text" placeholder="Optional label" style="width:160px"></label>
+    <button id="setFromMapBtn">Drop Pin on Map</button>
+    <button id="createLinkBtn">Create link & share</button>
+    <button id="permissionBtn">Enable Compass</button>
+    <span style="color:#9aa3af; font-size:13px">View: <button id="streetBtn">Street</button> <button id="satBtn">Satellite</button></span>
+  </div>
+
+  <!-- MAP (only in admin mode) -->
+  <div id="map"></div>
+
+  <!-- BEACON (player) -->
+  <div id="beaconWrap">
+    <div class="beacon" role="img" aria-label="Tracking beacon interface">
+      <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
+      <div class="eye" id="eye"></div>
+      <div class="tick" id="tick"></div>
+      <div class="panel">
+        <div class="label" id="labelDisplay">Beacon Linked</div>
+        <div class="readout" id="distanceDisplay">—</div>
+        <div class="tiny" id="aux">Grant location, then tap ARM to enable audio.</div>
+        <div class="armWrap"><button class="arm glow" id="armBtn">ARM / START</button></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+/* ----------------------------------------------------------
+   MODE DETECTION
+---------------------------------------------------------- */
+const params = new URLSearchParams(location.search);
+const isAdmin = params.get('admin') === '1';
+const urlTarget = (()=>{
+  const lat = parseFloat(params.get('lat'));
+  const lng = parseFloat(params.get('lng'));
+  const label = params.get('label') || '';
+  return (Number.isFinite(lat) && Number.isFinite(lng)) ? {lat,lng,label} : null;
+})();
+
+/* ----------------------------------------------------------
+   ADMIN MODE (map builder and link share)
+---------------------------------------------------------- */
+let map, osm, esriSat, targetMarker, userMarker, accuracyCircle;
+let target = urlTarget || null;
+
+const topBar = document.getElementById('top');
+const mapEl = document.getElementById('map');
+const targetInput = document.getElementById('targetInput');
+const labelInput = document.getElementById('labelInput');
+const createLinkBtn = document.getElementById('createLinkBtn');
+const setFromMapBtn = document.getElementById('setFromMapBtn');
+const permissionBtn = document.getElementById('permissionBtn');
+const streetBtn = document.getElementById('streetBtn');
+const satBtn = document.getElementById('satBtn');
+
+if(isAdmin){
+  topBar.classList.add('show');
+  mapEl.classList.add('show');
+
+  osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
+  esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri, Maxar'});
+
+  map = L.map('map',{zoomControl:true,layers:[osm]}).setView([39,-98],4);
+
+  streetBtn.onclick=()=>{ if(map.hasLayer(esriSat)) map.removeLayer(esriSat); if(!map.hasLayer(osm)) osm.addTo(map); };
+  satBtn.onclick=()=>{ if(map.hasLayer(osm)) map.removeLayer(osm); if(!map.hasLayer(esriSat)) esriSat.addTo(map); };
+
+  if(target){
+    targetInput.value = `${target.lat},${target.lng}`;
+    labelInput.value = target.label;
+    setTargetOnMap(target);
+    map.setView([target.lat, target.lng], 17);
+  }
+
+  map.on('click', (e)=>{
+    setTargetOnMap({lat:e.latlng.lat, lng:e.latlng.lng, label: labelInput.value || ''});
+    targetInput.value = `${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;
+  });
+
+  setFromMapBtn.onclick = () => alert('Tap on the map to drop the beacon location.');
+
+  createLinkBtn.onclick = async ()=>{
+    const parsed = parseLatLng(targetInput.value);
+    if(parsed) setTargetOnMap({lat:parsed.lat, lng:parsed.lng, label: labelInput.value || ''});
+    if(!target){ alert('Set a target first'); return; }
+    const url = new URL(location.href);
+    url.search = '';
+    url.searchParams.set('lat', target.lat);
+    url.searchParams.set('lng', target.lng);
+    if(labelInput.value) url.searchParams.set('label', labelInput.value);
+    // share/copy
+    const finalUrl = url.toString();
+    const ok = await shareOrCopy(finalUrl);
+    createLinkBtn.textContent = ok ? 'Link shared/copied!' : 'Create link & share';
+    setTimeout(()=> createLinkBtn.textContent='Create link & share', 1600);
+  };
+
+  // optional compass for admin if you want; not critical
+  permissionBtn.onclick = requestCompass;
+
+  startGeolocation(); // also shows admin’s own dot (useful sanity-check)
+}
+
+/* helpers */
+function parseLatLng(s){
+  if(!s) return null;
+  const [a,b] = s.split(',').map(p=>p.trim());
+  const lat = parseFloat(a), lng = parseFloat(b);
+  return (Number.isFinite(lat)&&Number.isFinite(lng)) ? {lat,lng} : null;
+}
+function setTargetOnMap(t){
+  target = {lat:t.lat, lng:t.lng, label:t.label||''};
+  if(map){
+    if(targetMarker) map.removeLayer(targetMarker);
+    targetMarker = L.marker([target.lat, target.lng]).addTo(map).bindPopup(target.label||'Target');
+  }
+}
+async function shareOrCopy(url){
+  if(navigator.share){
+    try{ await navigator.share({title:'Beacon', url}); return true; }catch(e){}
+  }
+  try{ await navigator.clipboard.writeText(url); return true; }catch(e){}
+  try{
+    const ta=document.createElement('textarea'); ta.value=url; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select(); const ok=document.execCommand('copy'); document.body.removeChild(ta);
+    if(ok) return true;
+  }catch(e){}
+  prompt('Copy this link:', url); return false;
+}
+
+/* ----------------------------------------------------------
+   PLAYER / BEACON MODE (diegetic UI, no map)
+---------------------------------------------------------- */
+const beaconWrap = document.getElementById('beaconWrap');
+const eyeEl = document.getElementById('eye');
+const tickEl = document.getElementById('tick');
+const labelDisplay = document.getElementById('labelDisplay');
+const distanceDisplay = document.getElementById('distanceDisplay');
+const aux = document.getElementById('aux');
+const armBtn = document.getElementById('armBtn');
+
+let deviceHeading = null;
+let lastPos = null;
+let audioCtx = null, oscillator = null, gainNode = null;
+let beepTimer = null, sweepTimer = null;
+let armed = false;
+
+/* show correct surface */
+if(!isAdmin){
+  beaconWrap.classList.add('show');
+  if(urlTarget){
+    target = urlTarget;
+    labelDisplay.textContent = target.label ? target.label : 'Beacon Linked';
+  }else{
+    labelDisplay.textContent = 'No Beacon';
+    aux.textContent = 'This view is for players. Ask the organizer for a beacon link.';
+    armBtn.classList.add('hidden');
+  }
+}
+
+/* Geolocation for both modes (admin to show dot; player to compute distance) */
+function startGeolocation(){
+  if(!('geolocation' in navigator)){ distanceDisplay.textContent='Location unavailable'; return; }
+  navigator.geolocation.watchPosition(onPosition, onGeoError, {enableHighAccuracy:true, maximumAge:1000, timeout:10000});
+}
+function onGeoError(err){
+  if(!isAdmin){
+    distanceDisplay.textContent = 'Location blocked';
+    aux.textContent = 'Allow location access to track.';
+  }
+}
+startGeolocation();
+
+/* Orientation (not strictly needed for beeps, but keeps tick sweep in sync with facing if desired) */
+function requestCompass(){
+  if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+    DeviceOrientationEvent.requestPermission().then(res=>{
+      if(res==='granted'){ window.addEventListener('deviceorientation', onOrient, true); }
+    }).catch(()=>{});
+  }else{
+    window.addEventListener('deviceorientation', onOrient, true);
+  }
+}
+function onOrient(e){
+  let h=null;
+  if(typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+  else if(typeof e.alpha === 'number') h = (360 - e.alpha) % 360;
+  if(h!=null) deviceHeading = h;
+}
+
+/* Distance & feedback mapping */
+function onPosition(pos){
+  const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy||0;
+  lastPos = {lat,lng,acc};
+
+  // Admin self marker
+  if(isAdmin && map){
+    if(userMarker) userMarker.setLatLng([lat,lng]); else userMarker = L.marker([lat,lng]).addTo(map).bindPopup('You');
+    if(accuracyCircle) accuracyCircle.setLatLng([lat,lng]).setRadius(acc);
+    else accuracyCircle = L.circle([lat,lng], {radius: acc, color:'#3388ff', weight:1, fillOpacity:0.06}).addTo(map);
+  }
+
+  if(!target || !beaconWrap.classList.contains('show')) return;
+
+  const d = haversine(lat,lng,target.lat,target.lng);
+  const text = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
+  distanceDisplay.textContent = text;
+
+  // Update LED pulse speed
+  const { intervalMs, pitchHz } = cadenceForDistance(d);
+  eyeEl.style.animationDuration = Math.max(0.3, intervalMs/900).toFixed(2)+'s';
+
+  // Update sweep tick rotation (fun visual; rotates faster closer)
+  const sweepSpeed = Math.max(0.8, 3000/intervalMs); // rev/sec
+  startSweep(sweepSpeed);
+
+  // If armed, update beep pattern
+  if(armed) scheduleBeep(intervalMs, pitchHz);
+
+  // Close proximity “lock” effect
+  if(d <= 6){
+    eyeEl.style.filter = 'brightness(2)';
+    if(navigator.vibrate) navigator.vibrate([20,60,20,60]); // short lock-on buzz
+  }
+}
+
+/* Distance -> cadence mapping */
+function cadenceForDistance(dMeters){
+  // piecewise mapping: farther = slower & lower pitch
+  // Tweak these to taste.
+  if(dMeters > 800) return { intervalMs: 1400, pitchHz: 420 };
+  if(dMeters > 300) return { intervalMs: 900,  pitchHz: 500 };
+  if(dMeters > 120) return { intervalMs: 600,  pitchHz: 620 };
+  if(dMeters > 40)  return { intervalMs: 380,  pitchHz: 760 };
+  if(dMeters > 15)  return { intervalMs: 260,  pitchHz: 900 };
+  if(dMeters > 6)   return { intervalMs: 180,  pitchHz: 1020 };
+  // “lock-on” zone
+  return { intervalMs: 120, pitchHz: 1200 };
+}
+
+/* Web Audio: short pip beep */
+function ensureAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  gainNode = audioCtx.createGain(); gainNode.gain.value = 0.0001; // start muted
+  gainNode.connect(audioCtx.destination);
+}
+function playPip(freq=800, ms=90){
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(freq, now);
+  o.connect(gainNode);
+  // envelope
+  const g = gainNode.gain;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(0.0001, now);
+  g.linearRampToValueAtTime(0.3, now + 0.01);
+  g.exponentialRampToValueAtTime(0.0001, now + ms/1000);
+  o.start(now);
+  o.stop(now + (ms/1000) + 0.05);
+  // haptic tap if available
+  if(navigator.vibrate) navigator.vibrate(12);
+}
+function scheduleBeep(intervalMs, pitchHz){
+  // Avoid rescheduling too often—only change if interval changed meaningfully
+  if(scheduleBeep.lastInterval === intervalMs) return;
+  scheduleBeep.lastInterval = intervalMs;
+  if(beepTimer) clearInterval(beepTimer);
+  // fire one immediately, then at cadence
+  playPip(pitchHz);
+  beepTimer = setInterval(()=> playPip(pitchHz), Math.max(120, intervalMs));
+}
+
+/* Decorative sweep tick */
+function startSweep(revPerSec){
+  if(startSweep._rev === revPerSec) return;
+  startSweep._rev = revPerSec;
+  if(sweepTimer) cancelAnimationFrame(sweepTimer);
+  const tick = tickEl;
+  let start=null;
+  function step(ts){
+    if(!start) start = ts;
+    const elapsed = (ts - start)/1000; // seconds
+    const angle = (elapsed * revPerSec * 360) % 360;
+    tick.style.transform = `translate(-50%,-50%) rotate(${angle}deg)`;
+    sweepTimer = requestAnimationFrame(step);
+  }
+  sweepTimer = requestAnimationFrame(step);
+}
+
+/* ARM button */
+if(armBtn){
+  armBtn.onclick = async ()=>{
+    ensureAudio();
+    // iOS requires user gesture + resume
+    try{ await audioCtx.resume(); }catch(e){}
+    armed = true;
+    armBtn.classList.add('hidden');
+    aux.textContent = 'Tracking… beeps accelerate as you approach.';
+  };
+}
+
+/* Math helpers */
+function toRad(v){ return v*Math.PI/180 }
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371000;
+  const φ1=toRad(lat1), φ2=toRad(lat2);
+  const dφ=toRad(lat2-lat1), dλ=toRad(lon2-lon1);
+  const a = Math.sin(dφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* Security + UX hints */
+if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+  // Compass not required here, but in case you later add it, warn early.
+  console.warn('Tip: use HTTPS for best sensor support on iOS.');
+}
+  </script>
+</body>
+</html>
