@@ -2,298 +2,129 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
-<title>LARP Beacon</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>LARP Beacon (Safe Mode)</title>
 <style>
   :root{--bg:#0b0e12;--rim:#1d2530;--text:#e5e7eb;--muted:#9aa3af}
-  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-
-  /* Admin header + map (admin only) */
-  #top{display:none;padding:8px;gap:8px;align-items:center;background:#0f141b;border-bottom:1px solid #1f2a38}
-  #top.show{display:flex;flex-wrap:wrap}
-  input[type="text"]{padding:8px 10px;border:1px solid #39495e;background:#0b1118;color:var(--text);border-radius:8px}
-  button{padding:10px 12px;border-radius:10px;border:1px solid #374151;background:#131a22;color:var(--text);cursor:pointer}
-  button:disabled{opacity:.6;cursor:not-allowed}
-  #map{display:none;height:calc(100vh - 56px)} #map.show{display:block}
-
-  /* Player beacon */
-  #beaconWrap{display:none;height:100vh;padding:22px;box-sizing:border-box;display:flex;align-items:center;justify-content:center}
-  #beaconWrap.show{display:flex}
-  .beacon{width:min(86vw,520px);aspect-ratio:1/1;position:relative;border-radius:50%;
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;display:flex;align-items:center;justify-content:center}
+  .wrap{width:min(86vw,520px)}
+  .beacon{position:relative;aspect-ratio:1/1;border-radius:50%;border:10px solid var(--rim);
           background:radial-gradient(ellipse at 50% 45%,#0f151e 0%,#0b0e12 55%,#070a0d 100%);
-          border:10px solid var(--rim);box-shadow:inset 0 0 40px rgba(0,0,0,.8),0 10px 40px rgba(0,0,0,.4)}
+          box-shadow:inset 0 0 40px rgba(0,0,0,.8),0 10px 40px rgba(0,0,0,.4)}
   .ring{position:absolute;inset:6%;border-radius:50%;border:2px solid #1a2230;box-shadow:inset 0 0 20px rgba(0,0,0,.6)}
   .r2{inset:16%}.r3{inset:26%}.r4{inset:36%}
-  .eye{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);
-       width:34%;aspect-ratio:1/1;border-radius:50%;
+  .eye{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:34%;aspect-ratio:1/1;border-radius:50%;
        background:radial-gradient(circle at 50% 45%,#ff6b6b 0%,#e31616 35%,#7a0d0d 75%,#2a0707 100%);
-       box-shadow:0 0 40px rgba(255,60,60,.45),0 0 120px rgba(255,40,40,.25);
-       animation:pulse 1.2s infinite}
+       box-shadow:0 0 40px rgba(255,60,60,.45),0 0 120px rgba(255,40,40,.25);animation:pulse 1.2s infinite}
   @keyframes pulse{0%,70%{filter:brightness(1)}100%{filter:brightness(1.6)}}
-  .tick{position:absolute;left:50%;top:42%;transform-origin:50% 50%;
-        transform:translate(-50%,-50%) rotate(0deg);
-        width:40%;height:2px;background:linear-gradient(90deg,rgba(255,60,60,0) 0%,rgba(255,60,60,0.6) 100%);
-        border-radius:2px;opacity:.8}
-
-  /* Info panel */
-  .panel{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);
-         width:min(86%,520px);max-width:520px;padding:14px;border-radius:12px;
+  .tick{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%) rotate(0deg);transform-origin:50% 50%;
+        width:40%;height:2px;background:linear-gradient(90deg,rgba(255,60,60,0) 0%,rgba(255,60,60,.6) 100%);border-radius:2px;opacity:.8}
+  .panel{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);width:90%;max-width:520px;padding:14px;border-radius:12px;
          background:linear-gradient(180deg,#0f141b,#0b0f15);border:1px solid #1c2532;text-align:center;
          box-shadow:0 6px 24px rgba(0,0,0,.35),inset 0 0 30px rgba(0,0,0,.25)}
   .label{font-size:14px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
   .readout{margin-top:6px;font-size:28px}
-  .tiny{font-size:12px;color:#8a93a1;margin-top:4px}
-
-  /* Controls: single stack (no absolute overlap) */
+  .tiny{font-size:12px;color:#8a93a1;margin-top:4px;min-height:1.2em}
   .controls{margin-top:10px;display:flex;flex-direction:column;gap:8px;align-items:center}
-  .btn{padding:12px 16px;border-radius:999px;border:1px solid #3a4a5f;background:#101822}
-  .btn.glow{box-shadow:0 0 16px rgba(255,60,60,.35);border-color:#9b2b2b;background:#1a0f12}
-  .hidden{display:none!important}
+  .btn{padding:12px 16px;border-radius:999px;border:1px solid #3a4a5f;background:#101822;color:var(--text);cursor:pointer}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .glow{box-shadow:0 0 16px rgba(255,60,60,.35);border-color:#9b2b2b;background:#1a0f12}
+  .log{margin-top:8px;font-size:12px;opacity:.75;white-space:pre-wrap;text-align:left;max-height:120px;overflow:auto}
 </style>
 </head>
 <body>
-
-<!-- ADMIN (map builder) -->
-<div id="top">
-  <label>Target: <input id="targetInput" type="text" placeholder="lat,lng or drop pin" style="width:220px"></label>
-  <label>Label: <input id="labelInput" type="text" placeholder="Optional label" style="width:160px"></label>
-  <button id="setFromMapBtn">Drop Pin</button>
-  <button id="createLinkBtn">Create link & share</button>
-  <button id="streetBtn">Street</button>
-  <button id="satBtn">Satellite</button>
-</div>
-<div id="map"></div>
-
-<!-- PLAYER (diegetic tracker) -->
-<div id="beaconWrap">
-  <div class="beacon" aria-label="Tracking beacon">
-    <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
-    <div class="eye" id="eye"></div>
-    <div class="tick" id="tick"></div>
-    <div class="panel">
-      <div class="label" id="labelDisplay">Beacon Linked</div>
-      <div class="readout" id="distanceDisplay">—</div>
-      <div class="tiny" id="aux">Tap ENABLE LOCATION, then ARM to start audio.</div>
-
-      <div class="controls">
-        <button class="btn" id="locBtn">ENABLE LOCATION</button>
-        <button class="btn glow" id="armBtn">ARM / START</button>
-        <div id="geoMsg" class="tiny"></div>
+  <div class="wrap">
+    <div class="beacon" aria-label="Tracking beacon">
+      <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div>
+      <div class="eye" id="eye"></div>
+      <div class="tick" id="tick"></div>
+      <div class="panel">
+        <div class="label" id="labelDisplay">Beacon</div>
+        <div class="readout" id="distanceDisplay">—</div>
+        <div class="tiny" id="aux">Tap ENABLE LOCATION, then ARM for audio.</div>
+        <div class="controls">
+          <button class="btn" id="locBtn">ENABLE LOCATION</button>
+          <button class="btn glow" id="armBtn">ARM / START</button>
+          <div class="tiny" id="geoMsg"></div>
+          <div class="log" id="logBox"></div>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-/* ---------- Helpers ---------- */
-const toRad=v=>v*Math.PI/180;
-function haversine(a,b,c,d){const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(c-a),dλ=toRad(d-b);
-  const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}
-function parseLatLng(s){if(!s)return null;const [a,b]=s.split(',').map(x=>x.trim());const lat=parseFloat(a),lng=parseFloat(b);
-  return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;}
+(function(){
+  // ---------- utilities
+  const $=id=>document.getElementById(id);
+  const logBox=$('logBox'); const log=(m)=>{ console.log('[Beacon]',m); logBox.textContent += m + '\\n'; };
+  const toRad=v=>v*Math.PI/180;
+  const haversine=(a,b,c,d)=>{const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(c-a),dλ=toRad(d-b);
+    const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2; return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s)); };
+  const qs=new URLSearchParams(location.search);
+  const target=(()=>{const lat=parseFloat(qs.get('lat')),lng=parseFloat(qs.get('lng')),label=qs.get('label')||'';return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng,label}:null})();
 
-const params=new URLSearchParams(location.search);
-const isAdmin=params.get('admin')==='1';
-const targetParam=(()=>{const lat=parseFloat(params.get('lat')),lng=parseFloat(params.get('lng')),label=params.get('label')||'';
-  return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng,label}:null;})();
+  // ---------- elements
+  const labelDisplay=$('labelDisplay'), distanceDisplay=$('distanceDisplay'), aux=$('aux'), geoMsg=$('geoMsg');
+  const locBtn=$('locBtn'), armBtn=$('armBtn'), eye=$('eye'), tick=$('tick');
 
-let target=targetParam||null;
+  // ---------- audio
+  let audioCtx=null,gainNode=null,armed=false,beepTimer=null,sweepRAF=null;
+  function ensureAudio(){ if(audioCtx) return; audioCtx=new (window.AudioContext||window.webkitAudioContext)(); gainNode=audioCtx.createGain(); gainNode.gain.value=0.0001; gainNode.connect(audioCtx.destination); }
+  function pip(freq=800,ms=90){ if(!audioCtx) return; const now=audioCtx.currentTime; const o=audioCtx.createOscillator();
+    o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
+    const g=gainNode.gain; g.setValueAtTime(0.0001,now); g.linearRampToValueAtTime(0.3,now+0.01); g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
+    o.start(now); o.stop(now+ms/1000+.05); navigator.vibrate?.(12); }
+  function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620}; if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
+  function schedule(it,f){ if(schedule._it===it) return; schedule._it=it; clearInterval(beepTimer); pip(f); beepTimer=setInterval(()=>pip(f),Math.max(120,it)); }
+  function sweep(rps){ if(sweep._rps===rps) return; sweep._rps=rps; cancelAnimationFrame(sweepRAF); let start=null;
+    function step(t){ if(!start) start=t; const e=(t-start)/1000; tick.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); }
+    sweepRAF=requestAnimationFrame(step); }
 
-/* ---------- Admin mode ---------- */
-const topBar=document.getElementById('top'),mapEl=document.getElementById('map');
-const targetInput=document.getElementById('targetInput'),labelInput=document.getElementById('labelInput');
-const setFromMapBtn=document.getElementById('setFromMapBtn'),createLinkBtn=document.getElementById('createLinkBtn');
-const streetBtn=document.getElementById('streetBtn'),satBtn=document.getElementById('satBtn');
+  // ---------- location
+  let watchId=null, lastPos=null;
+  function geoExplain(err){ if(!err) return 'Unknown error'; if(err.code===1) return 'Permission denied — enable Location (and Precise).'; if(err.code===2) return 'Position unavailable — try outside.'; if(err.code===3) return 'Timeout — try again.'; return err.message||'Location error'; }
+  function geoSuccess(pos){
+    const {latitude,longitude,accuracy}=pos.coords;
+    lastPos={lat:latitude,lng:longitude,acc:accuracy};
+    log(`fix: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} ±${Math.round(accuracy)}m`);
+    geoMsg.textContent='Location active.'; locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
 
-let map,osm,esriSat,targetMarker,userMarker,accuracyCircle;
-if(isAdmin){
-  topBar.classList.add('show'); mapEl.classList.add('show');
-  osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
-  esriSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
-  map=L.map('map',{layers:[osm]}).setView([39,-98],4);
-  streetBtn.onclick=()=>{if(map.hasLayer(esriSat))map.removeLayer(esriSat);osm.addTo(map)};
-  satBtn.onclick=()=>{if(map.hasLayer(osm))map.removeLayer(osm);esriSat.addTo(map)};
-
-  if(target){targetInput.value=`${target.lat},${target.lng}`;labelInput.value=target.label;setTarget(target);map.setView([target.lat,target.lng],17);}
-  map.on('click',e=>{setTarget({lat:e.latlng.lat,lng:e.latlng.lng,label:labelInput.value||''});
-                     targetInput.value=`${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;});
-  setFromMapBtn.onclick=()=>alert('Tap the map to drop the beacon.');
-
-  createLinkBtn.onclick=async()=>{
-    const p=parseLatLng(targetInput.value); if(p) setTarget({lat:p.lat,lng:p.lng,label:labelInput.value||''});
-    if(!target){alert('Set a target first'); return;}
-    const u=new URL(location.href); u.search=''; u.searchParams.set('lat',target.lat); u.searchParams.set('lng',target.lng);
-    if(labelInput.value) u.searchParams.set('label',labelInput.value);
-    const link=u.toString();
-    try{ await navigator.clipboard.writeText(link); createLinkBtn.textContent='Copied!'; }
-    catch{ prompt('Copy this link:', link); }
-    setTimeout(()=>createLinkBtn.textContent='Create link & share',1400);
-  };
-}
-function setTarget(t){target={lat:t.lat,lng:t.lng,label:t.label||''};
-  if(isAdmin&&map){ if(targetMarker)map.removeLayer(targetMarker); targetMarker=L.marker([t.lat,t.lng]).addTo(map).bindPopup(t.label||'Target'); }}
-
-/* ---------- Player mode visuals ---------- */
-const beaconWrap=document.getElementById('beaconWrap'),eyeEl=document.getElementById('eye'),tickEl=document.getElementById('tick');
-const labelDisplay=document.getElementById('labelDisplay'),distanceDisplay=document.getElementById('distanceDisplay');
-const aux=document.getElementById('aux'),locBtn=document.getElementById('locBtn'),armBtn=document.getElementById('armBtn');
-const geoMsg=document.getElementById('geoMsg');
-
-if(!isAdmin){
-  beaconWrap.classList.add('show');
-  labelDisplay.textContent = target?.label || 'Beacon Linked';
-}
-
-/* Audio + cadence */
-let audioCtx=null,gainNode=null,beepTimer=null,sweepRAF=null,armed=false,lastPos=null;
-function ensureAudio(){ if(audioCtx) return; audioCtx=new (window.AudioContext||window.webkitAudioContext)(); gainNode=audioCtx.createGain();
-  gainNode.connect(audioCtx.destination); gainNode.gain.value=0.0001; }
-function pip(freq=800,ms=90){ if(!audioCtx) return; const now=audioCtx.currentTime; const o=audioCtx.createOscillator();
-  o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
-  const g=gainNode.gain; g.setValueAtTime(0.0001,now); g.linearRampToValueAtTime(0.3,now+0.01); g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
-  o.start(now); o.stop(now+ms/1000+.05); navigator.vibrate?.(12); }
-function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620};
-  if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
-function schedule(it,f){ if(schedule._it===it) return; schedule._it=it; clearInterval(beepTimer); pip(f); beepTimer=setInterval(()=>pip(f),Math.max(120,it)); }
-function sweep(rps){ if(sweep._rps===rps) return; sweep._rps=rps; cancelAnimationFrame(sweepRAF); let start=null;
-  function step(t){ if(!start) start=t; const e=(t-start)/1000; tickEl.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); }
-  sweepRAF=requestAnimationFrame(step); }
-armBtn.onclick=async()=>{ ensureAudio(); try{await audioCtx.resume();}catch{} armed=true; armBtn.disabled=true; armBtn.textContent='ARMED'; aux.textContent='Tracking active.'; };
-
-/* ---------- Location handling (no overlays, single watcher) ---------- */
-function insecureHint(){ if(location.protocol!=='https:'&&location.hostname!=='localhost'){ aux.textContent='⚠️ Use an https:// URL for location on iOS.'; } }
-insecureHint();
-
-let watchId=null;
-function startWatcher(){
-  if(!('geolocation' in navigator)){ geoMsg.textContent='Geolocation not supported'; return; }
-  if(watchId!==null) return; // prevent duplicates
-  watchId = navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:1000});
-}
-function requestOneShot(){
-  if(!('geolocation' in navigator)){ geoMsg.textContent='Geolocation not supported'; return; }
-  navigator.geolocation.getCurrentPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:0});
-}
-function onGeoOK(pos){
-  geoMsg.textContent='Location active.';
-  locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
-  updateFromPosition(pos);
-}
-function onGeoErr(err){
-  const code=err?.code, msg = code===1 ? 'Permission denied — allow Location (and Precise).' :
-              code===2 ? 'Position unavailable — go outside or wait for GPS.' :
-              code===3 ? 'Timeout — try again.' : (err?.message || 'Location error');
-  geoMsg.textContent = msg;
-  locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION';
-}
-locBtn.addEventListener('click', requestOneShot);
-startWatcher();
-
-if(navigator.permissions?.query){
-  try{
-    navigator.permissions.query({name:'geolocation'}).then(s=>{
-      geoMsg.textContent = 'Permission: ' + s.state;
-      s.onchange = ()=> geoMsg.textContent = 'Permission: ' + s.state;
-    });
-  }catch{}
-}
-
-/* ---------- Position -> UI/Audio ---------- */
-function updateFromPosition(pos){
-  const lat=pos.coords.latitude, lng=pos.coords.longitude;
-  lastPos={lat,lng};
-  if(isAdmin&&map){
-    if(userMarker) userMarker.setLatLng([lat,lng]); else userMarker=L.marker([lat,lng]).addTo(map).bindPopup('You');
-    const acc=pos.coords.accuracy||0;
-    if(accuracyCircle) accuracyCircle.setLatLng([lat,lng]).setRadius(acc);
-    else accuracyCircle=L.circle([lat,lng],{radius:acc,color:'#3388ff',weight:1,fillOpacity:0.06}).addTo(map);
+    if(target){
+      const d=haversine(latitude,longitude,target.lat,target.lng);
+      distanceDisplay.textContent = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
+      const {it,f}=cadence(d); eye.style.animationDuration=Math.max(0.3,it/900)+'s'; sweep(Math.max(0.8,3000/it)); if(armed) schedule(it,f);
+      if(d<=6){ eye.style.filter='brightness(2)'; navigator.vibrate?.([20,60,20,60]); }
+    }else{
+      distanceDisplay.textContent='(No target in URL)';
+      aux.textContent='Add ?lat=..&lng=..&label=.. to the link.';
+    }
   }
-  if(!target) return;
-  const d=haversine(lat,lng,target.lat,target.lng);
-  distanceDisplay.textContent = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
-  const {it,f}=cadence(d);
-  eyeEl.style.animationDuration = Math.max(0.3, it/900) + 's';
-  sweep(Math.max(0.8, 3000/it));
-  if(armed) schedule(it,f);
-  if(d<=6){ eyeEl.style.filter='brightness(2)'; navigator.vibrate?.([20,60,20,60]); }
-}
+  function geoError(err){ const m=geoExplain(err); log('geo error: '+m); geoMsg.textContent=m; locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION'; }
 
-/* ---------- Show player/admin surfaces ---------- */
-if(!isAdmin){ beaconWrap.classList.add('show'); }
-<script>
-/* ================= FIXED LOCATION HANDLING ================= */
-
-const locBtn = document.getElementById('locBtn');
-const geoMsg = document.getElementById('geoMsg');
-const distanceDisplay = document.getElementById('distanceDisplay');
-const aux = document.getElementById('aux');
-
-function logStatus(msg) {
-  geoMsg.textContent = msg;
-  console.log('[Beacon]', msg);
-}
-
-// Called when we get a location
-function onGeoSuccess(pos) {
-  const { latitude, longitude, accuracy } = pos.coords;
-  logStatus(`Got position: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} ±${Math.round(accuracy)}m`);
-  locBtn.disabled = true;
-  locBtn.textContent = "LOCATION ENABLED";
-  aux.textContent = "Tap ARM / START to begin beacon tracking.";
-  // If your app has an onPosition function, call it
-  if (typeof onPosition === "function") onPosition(pos);
-}
-
-// Called when location fails
-function onGeoError(err) {
-  let reason = "Unknown error";
-  if (err.code === 1) reason = "Permission denied — enable Location (and Precise).";
-  if (err.code === 2) reason = "Position unavailable — try outside.";
-  if (err.code === 3) reason = "Timeout — trying again.";
-  logStatus("Location error: " + reason);
-  locBtn.disabled = false;
-  locBtn.textContent = "ENABLE LOCATION";
-}
-
-// Works with iOS (must be inside user gesture)
-async function requestLocation() {
-  logStatus("Requesting location access...");
-  if (!navigator.geolocation) {
-    logStatus("Geolocation not supported on this browser.");
-    return;
+  function requestLocationOnce(){
+    if(!navigator.geolocation){ geoMsg.textContent='Geolocation not supported'; return; }
+    log('requesting one-shot location');
+    navigator.geolocation.getCurrentPosition(geoSuccess, geoError, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
   }
-  try {
-    navigator.geolocation.getCurrentPosition(onGeoSuccess, onGeoError, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0
-    });
-  } catch (e) {
-    logStatus("Geolocation exception: " + e.message);
+  function startWatcher(){
+    if(!navigator.geolocation){ geoMsg.textContent='Geolocation not supported'; return; }
+    if(watchId!==null) return;
+    log('starting watchPosition');
+    watchId = navigator.geolocation.watchPosition(geoSuccess, geoError, { enableHighAccuracy:true, timeout:20000, maximumAge:2000 });
   }
-}
 
-// Attach both click and touch for reliability
-["click", "touchend"].forEach(ev =>
-  locBtn.addEventListener(ev, requestLocation, { passive: true })
-);
+  // ---------- button wiring (robust)
+  ['click','touchend'].forEach(ev => locBtn.addEventListener(ev, requestLocationOnce, { passive:true }));
+  ['click','touchend'].forEach(ev => armBtn.addEventListener(ev, async ()=>{ ensureAudio(); try{await audioCtx.resume();}catch{} armed=true; armBtn.disabled=true; armBtn.textContent='ARMED'; aux.textContent='Tracking active.'; }, { passive:true }));
 
-// Automatic watcher (updates position after permission granted)
-if ("geolocation" in navigator) {
-  navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, {
-    enableHighAccuracy: true,
-    timeout: 20000,
-    maximumAge: 2000
-  });
-}
-
-// Warn if not HTTPS
-if (location.protocol !== "https:" && location.hostname !== "localhost") {
-  logStatus("⚠️ iOS requires HTTPS for geolocation. Use https:// (GitHub Pages / Netlify).");
-}
+  // ---------- init
+  if(location.protocol!=='https:' && location.hostname!=='localhost'){
+    geoMsg.textContent='⚠️ Use https:// (GitHub Pages/Netlify) for iOS location.';
+  }
+  if(target){ labelDisplay.textContent = target.label || 'Beacon'; }
+  startWatcher(); // kicks off permission flow on many devices too
+})();
 </script>
 </body>
 </html>
-
