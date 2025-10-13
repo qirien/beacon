@@ -16,12 +16,13 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-appl
 input[type="text"]{padding:8px 10px;border:1px solid #39495e;background:#0b1118;color:var(--text);border-radius:8px}
 button{padding:10px 12px;border-radius:10px;border:1px solid #374151;background:#131a22;color:var(--text);cursor:pointer}
 button:disabled{opacity:.6;cursor:not-allowed}
-#map{display:none;height:calc(100vh - 56px)} #map.show{display:block}
+.small{font-size:12px;color:#9aa3af}
+#map{display:none;height:calc(100vh - 116px)} #map.show{display:block}
 
-/* Layout: center column */
+/* Layout: center column (player) */
 .container{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px}
 
-/* Beacon (no controls inside; no overlap) */
+/* Beacon */
 .beaconWrap{width:min(86vw,520px)}
 .beacon{position:relative;aspect-ratio:1/1;border-radius:50%;
   border:10px solid var(--rim);
@@ -38,8 +39,6 @@ button:disabled{opacity:.6;cursor:not-allowed}
   transform:translate(-50%,-50%) rotate(0deg);
   width:40%;height:2px;background:linear-gradient(90deg,rgba(255,60,60,0) 0%,rgba(255,60,60,.6) 100%);
   border-radius:2px;opacity:.8}
-
-/* Readouts (inside the beacon but compact, no buttons) */
 .panel{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);width:86%;max-width:520px;
   padding:10px 12px;border-radius:12px;background:linear-gradient(180deg,#0f141b,#0b0f15);border:1px solid #1c2532;text-align:center;
   box-shadow:0 6px 24px rgba(0,0,0,.35),inset 0 0 30px rgba(0,0,0,.25)}
@@ -47,26 +46,30 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .readout{margin-top:6px;font-size:28px}
 .tiny{font-size:12px;color:#8a93a1;margin-top:4px;min-height:1.2em}
 
-/* Controls (below the beacon; no overlap) */
+/* Controls (below beacon) */
 .controls{width:min(86vw,520px);display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:14px}
 .btn{padding:12px 16px;border-radius:999px;border:1px solid #3a4a5f;background:#101822;color:var(--text);width:100%}
 .btn.glow{box-shadow:0 0 16px rgba(255,60,60,.35);border-color:#9b2b2b;background:#1a0f12}
 .row{display:flex;gap:8px;width:100%}
 .row .btn{flex:1}
 .log{margin-top:6px;font-size:12px;opacity:.75;white-space:pre-wrap;text-align:left;width:100%;max-height:110px;overflow:auto}
-.hidden{display:none!important}
+
+/* Optional flash effect */
+.flash{filter:brightness(2)!important; box-shadow:0 0 60px rgba(255,60,60,.7),0 0 140px rgba(255,40,40,.45)!important}
 </style>
 </head>
 <body>
 
-<!-- ADMIN (map builder) -->
+<!-- ADMIN (map + ID link + download JSON) -->
 <div id="top">
-  <label>Target: <input id="targetInput" type="text" placeholder="lat,lng" style="width:220px"></label>
+  <label>ID: <input id="idInput" type="text" placeholder="e.g. cache1" style="width:120px"></label>
+  <label>Target: <input id="targetInput" type="text" placeholder="lat,lng" style="width:180px"></label>
   <label>Label: <input id="labelInput" type="text" placeholder="Optional label" style="width:160px"></label>
+  <button id="genIdBtn">Generate ID</button>
   <button id="dropPin">Drop Pin</button>
-  <button id="createLink">Create Link</button>
-  <button id="streetBtn">Street</button>
-  <button id="satBtn">Satellite</button>
+  <button id="createLink">Copy Clean Link</button>
+  <button id="downloadJson">Download targets.json</button>
+  <span class="small">View: <button id="streetBtn">Street</button> <button id="satBtn">Satellite</button></span>
 </div>
 <div id="map"></div>
 
@@ -85,8 +88,6 @@ button:disabled{opacity:.6;cursor:not-allowed}
       </div>
     </div>
   </div>
-
-  <!-- Controls BELOW the beacon -->
   <div class="controls">
     <div class="row">
       <button class="btn" id="locBtn">ENABLE LOCATION</button>
@@ -96,6 +97,10 @@ button:disabled{opacity:.6;cursor:not-allowed}
       <button class="btn" id="testBeepBtn">TEST BEEP</button>
       <button class="btn" id="muteBtn">MUTE</button>
     </div>
+    <div class="row">
+      <label class="small"><input type="checkbox" id="hapticsOnly"> Haptics only</label>
+      <label class="small"><input type="checkbox" id="flashOnBeep" checked> Flash on beep</label>
+    </div>
     <div class="log" id="logBox"></div>
   </div>
 </div>
@@ -103,170 +108,147 @@ button:disabled{opacity:.6;cursor:not-allowed}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
-/* ---------- utils ---------- */
+/* ---------- Utilities ---------- */
 const $=id=>document.getElementById(id);
+const logBox=$('logBox'); const log=m=>{console.log('[Beacon]',m); logBox.textContent += m + '\\n';};
 const toRad=v=>v*Math.PI/180;
 const haversine=(a,b,c,d)=>{const R=6371000,φ1=toRad(a),φ2=toRad(c),dφ=toRad(c-a),dλ=toRad(d-b);
-  const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));};
+  const s=Math.sin(dφ/2)**2+Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2; return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s)); };
+
 const params=new URLSearchParams(location.search);
 const isAdmin=params.get('admin')==='1';
-const target=(()=>{const lat=parseFloat(params.get('lat')),lng=parseFloat(params.get('lng')),label=params.get('label')||'';return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng,label}:null;})();
+const requestedId=params.get('id');
 
-/* ---------- admin (unchanged minimal) ---------- */
-const topBar=document.getElementById('top'),mapEl=document.getElementById('map');
+/* ---------- Persistent target store (from targets.json) ---------- */
+let TARGETS = {}; // id -> {lat,lng,label}
+async function loadTargets(){
+  try{
+    // cache-bust to make updates visible
+    const res = await fetch('targets.json?cb=' + Date.now());
+    if(res.ok){ TARGETS = await res.json(); log('Loaded targets.json'); }
+    else { log('targets.json not found, starting with empty map'); TARGETS = {}; }
+  }catch(e){
+    log('Failed to load targets.json (' + (e.message||e) + '), using empty');
+    TARGETS = {};
+  }
+}
+function saveTargetsToDownload(){
+  const data = JSON.stringify(TARGETS, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'targets.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  alert('Downloaded updated targets.json. Commit this file to your repo to persist new IDs.');
+}
+
+/* ---------- Admin setup ---------- */
+const topBar=$('top'),mapEl=$('map');
 let map,osm,esriSat,targetMarker;
-if(isAdmin){
+async function initAdmin(){
+  await loadTargets();
   topBar.classList.add('show'); mapEl.classList.add('show');
+
   osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
   esriSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
   map=L.map('map',{layers:[osm]}).setView([39,-98],4);
-  document.getElementById('streetBtn').onclick=()=>{if(map.hasLayer(esriSat))map.removeLayer(esriSat);osm.addTo(map)};
-  document.getElementById('satBtn').onclick=()=>{if(map.hasLayer(osm))map.removeLayer(osm);esriSat.addTo(map)};
-  map.on('click',e=>{if(targetMarker)map.removeLayer(targetMarker);targetMarker=L.marker(e.latlng).addTo(map);
-    document.getElementById('targetInput').value=`${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;});
-  document.getElementById('createLink').onclick=async()=>{
-    const v=document.getElementById('targetInput').value.split(',');
-    if(v.length<2){alert('Drop a pin or enter lat,lng');return;}
-    const [lat,lng]=v, label=document.getElementById('labelInput').value;
-    const u=new URL(location.href); u.search=''; u.searchParams.set('lat',lat); u.searchParams.set('lng',lng); if(label) u.searchParams.set('label',label);
-    try{await navigator.clipboard.writeText(u);}catch{prompt('Copy link:',u);}
-    alert('Link ready to share.');
+
+  $('streetBtn').onclick=()=>{ if(map.hasLayer(esriSat)) map.removeLayer(esriSat); osm.addTo(map); };
+  $('satBtn').onclick=()=>{ if(map.hasLayer(osm)) map.removeLayer(osm); esriSat.addTo(map); };
+  $('genIdBtn').onclick=()=>{ $('idInput').value = genId(); };
+
+  map.on('click', e=>{
+    if(targetMarker) map.removeLayer(targetMarker);
+    targetMarker = L.marker(e.latlng).addTo(map);
+    $('targetInput').value = `${e.latlng.lat.toFixed(6)},${e.latlng.lng.toFixed(6)}`;
+  });
+
+  $('createLink').onclick = async ()=>{
+    const id = ($('idInput').value || '').trim() || genId();
+    const t = $('targetInput').value.split(',');
+    if(t.length<2){ alert('Drop a pin or enter lat,lng'); return; }
+    const [latStr,lngStr] = t;
+    const lat = parseFloat(latStr), lng = parseFloat(lngStr);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng)){ alert('Invalid coordinates'); return; }
+
+    const label = $('labelInput').value || '';
+    if(TARGETS[id] && !confirm(`ID "${id}" already exists. Overwrite?`)) return;
+
+    TARGETS[id] = { lat, lng, label };
+    const u = new URL(location.href); u.search=''; u.searchParams.set('id', id);
+    try{ await navigator.clipboard.writeText(u.toString()); alert('Clean link copied: ' + u.toString()); }
+    catch{ prompt('Copy link:', u.toString()); }
   };
-}
 
-/* ---------- player elements ---------- */
+  $('downloadJson').onclick = saveTargetsToDownload;
+}
+function genId(){ return Math.random().toString(36).slice(2,8); }
+
+/* ---------- Player (beacon) ---------- */
 const eye=$('eye'),tick=$('tick'),distanceDisplay=$('distanceDisplay'),geoMsg=$('geoMsg'),aux=$('aux');
-const locBtn=$('locBtn'),armBtn=$('armBtn');
-const testBeepBtn=$('testBeepBtn')||document.getElementById('testBeepBtn'); // if you kept it
-const muteBtn=$('muteBtn')||document.getElementById('muteBtn');
+const locBtn=$('locBtn'),armBtn=$('armBtn'),testBeepBtn=$('testBeepBtn'),muteBtn=$('muteBtn');
+const hapticsOnlyEl=$('hapticsOnly'),flashOnBeepEl=$('flashOnBeep');
 
-/* add two simple toggles under your controls if you want:
-   <label><input type="checkbox" id="hapticsOnly"> Haptics mode</label>
-   <label><input type="checkbox" id="flashOnBeep" checked> Flash on beep</label>
-*/
-let hapticsOnlyEl = document.getElementById('hapticsOnly');
-let flashOnBeepEl = document.getElementById('flashOnBeep');
-
-/* ---------- audio with iOS-safe unlock ---------- */
 let audioCtx=null,gainNode=null,armed=false,beepTimer=null,sweepRAF=null,muted=false;
-function ensureAudio(){
-  if(audioCtx) return;
-  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  gainNode=audioCtx.createGain(); gainNode.gain.value=0.0001; gainNode.connect(audioCtx.destination);
-}
-async function unlockAudio(){
-  ensureAudio();
-  try{await audioCtx.resume();}catch{}
-  // tiny near-silent burst to open the path
-  const now=audioCtx.currentTime, o=audioCtx.createOscillator(), g=audioCtx.createGain();
-  o.type='sine'; o.frequency.setValueAtTime(440,now); g.gain.value=0.0001; o.connect(g); g.connect(audioCtx.destination);
-  o.start(now); o.stop(now+0.05);
-}
-function screenFlash(){
-  if(!(flashOnBeepEl?.checked)) return;
-  eye.classList.add('flash');
-  setTimeout(()=>eye.classList.remove('flash'),120);
-}
+function ensureAudio(){ if(audioCtx) return; audioCtx=new (window.AudioContext||window.webkitAudioContext)(); gainNode=audioCtx.createGain(); gainNode.gain.value=0.0001; gainNode.connect(audioCtx.destination); }
+async function unlockAudio(){ ensureAudio(); try{await audioCtx.resume();}catch{} const now=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.type='sine'; o.frequency.setValueAtTime(440,now); g.gain.value=0.0001; o.connect(g); g.connect(audioCtx.destination); o.start(now); o.stop(now+0.05); }
+function screenFlash(){ if(!(flashOnBeepEl?.checked)) return; eye.classList.add('flash'); setTimeout(()=>eye.classList.remove('flash'),120); }
 function pip(freq=800,ms=90){
-  // If user enabled haptics-only or the phone is muted, vibrate + flash only
-  if(hapticsOnlyEl?.checked){ navigator.vibrate?.(20); screenFlash(); return; }
-  if(muted) { navigator.vibrate?.(20); screenFlash(); return; }
+  if(hapticsOnlyEl?.checked || muted){ navigator.vibrate?.(20); screenFlash(); return; }
+  if(!audioCtx) return;
+  const now=audioCtx.currentTime, o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
+  const g=gainNode.gain; g.cancelScheduledValues(now); g.setValueAtTime(0.0001,now); g.linearRampToValueAtTime(0.4,now+0.015); g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
+  o.start(now); o.stop(now+ms/1000+.05); navigator.vibrate?.(12); screenFlash();
+}
+function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620}; if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
+function schedule(it,f){ if(schedule._it===it) return; schedule._it=it; clearInterval(beepTimer); pip(f); beepTimer=setInterval(()=>pip(f),Math.max(120,it)); }
+function sweep(rps){ if(sweep._rps===rps) return; sweep._rps=rps; cancelAnimationFrame(sweepRAF); let start=null; function step(t){ if(!start) start=t; const e=(t-start)/1000; tick.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); } sweepRAF=requestAnimationFrame(step); }
 
-  if(!audioCtx){return;}
-  const now=audioCtx.currentTime;
-  const o=audioCtx.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(freq,now); o.connect(gainNode);
-  const g=gainNode.gain;
-  g.cancelScheduledValues(now);
-  g.setValueAtTime(0.0001,now);
-  g.linearRampToValueAtTime(0.4,now+0.015);
-  g.exponentialRampToValueAtTime(0.0001,now+ms/1000);
-  o.start(now); o.stop(now+ms/1000+.05);
+['click','touchend'].forEach(ev=>armBtn.addEventListener(ev, async ()=>{ await unlockAudio(); armed=true; armBtn.disabled=true; armBtn.textContent='ARMED'; aux.textContent='Tracking active.'; pip(880,120); }, {passive:true}));
+['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{ await unlockAudio(); pip(740,120); }, {passive:true}));
+['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{ muted=!muted; muteBtn.textContent=muted?'UNMUTE':'MUTE'; }, {passive:true}));
 
-  navigator.vibrate?.(12);
-  screenFlash();
-}
-function cadence(d){ if(d>800)return{it:1400,f:420}; if(d>300)return{it:900,f:500}; if(d>120)return{it:600,f:620};
-  if(d>40)return{it:380,f:760}; if(d>15)return{it:260,f:900}; if(d>6)return{it:180,f:1020}; return{it:120,f:1200}; }
-function schedule(it,f){
-  if(schedule._it===it) return;
-  schedule._it=it;
-  clearInterval(beepTimer);
-  pip(f);
-  beepTimer=setInterval(()=>pip(f),Math.max(120,it));
-}
-function sweep(rps){
-  if(sweep._rps===rps) return;
-  sweep._rps=rps; cancelAnimationFrame(sweepRAF);
-  let start=null; function step(t){ if(!start) start=t; const e=(t-start)/1000; tick.style.transform=`translate(-50%,-50%) rotate(${(e*rps*360)%360}deg)`; sweepRAF=requestAnimationFrame(step); }
-  sweepRAF=requestAnimationFrame(step);
-}
-
-/* ---------- buttons ---------- */
-['click','touchend'].forEach(ev=>armBtn?.addEventListener(ev, async ()=>{
-  await unlockAudio();
-  armed=true;
-  armBtn.disabled=true; armBtn.textContent='ARMED';
-  aux.textContent='Tracking active.';
-  pip(880,120); // confirmation
-},{passive:true}));
-
-if(testBeepBtn){
-  ['click','touchend'].forEach(ev=>testBeepBtn.addEventListener(ev, async ()=>{ await unlockAudio(); pip(740,120); }, {passive:true}));
-}
-if(muteBtn){
-  ['click','touchend'].forEach(ev=>muteBtn.addEventListener(ev, ()=>{ muted=!muted; muteBtn.textContent=muted?'UNMUTE':'MUTE'; }, {passive:true}));
-}
-
-/* ---------- geolocation ---------- */
-let watchId=null;
-function explainGeo(err){
-  if(!err) return 'Unknown error';
-  if(err.code===1) return 'Permission denied — Allow & Precise ON in Safari.';
-  if(err.code===2) return 'Position unavailable — try outdoors.';
-  if(err.code===3) return 'Timeout — press ENABLE again.';
-  return err.message||'Location error';
-}
+/* ---------- Geolocation ---------- */
+let ACTIVE_TARGET = null; // {lat,lng,label} resolved from id or URL
+function explainGeo(err){ if(!err) return 'Unknown error'; if(err.code===1) return 'Permission denied — Allow & Precise ON in Safari.'; if(err.code===2) return 'Position unavailable — try outdoors.'; if(err.code===3) return 'Timeout — press ENABLE again.'; return err.message||'Location error'; }
 function onGeoOK(pos){
-  const {latitude,longitude}=pos.coords;
-  document.getElementById('geoMsg').textContent='Location active.';
-  const locBtn=document.getElementById('locBtn'); if(locBtn){locBtn.disabled=true;locBtn.textContent='LOCATION ENABLED';}
-  if(!target){ document.getElementById('distanceDisplay').textContent='(No target in URL)'; return; }
-  const d=haversine(latitude,longitude,target.lat,target.lng);
-  document.getElementById('distanceDisplay').textContent = d<1000?`${Math.round(d)} m`:`${(d/1000).toFixed(2)} km`;
-  const {it,f}=cadence(d);
-  eye.style.animationDuration=Math.max(0.3,it/900)+'s';
-  sweep(Math.max(0.8,3000/it));
-  if(armed) schedule(it,f);
+  geoMsg.textContent='Location active.'; locBtn.disabled=true; locBtn.textContent='LOCATION ENABLED';
+  if(!ACTIVE_TARGET){ distanceDisplay.textContent='(No target)'; return; }
+  const {latitude,longitude}=pos.coords; const d=haversine(latitude,longitude,ACTIVE_TARGET.lat,ACTIVE_TARGET.lng);
+  distanceDisplay.textContent = d<1000 ? `${Math.round(d)} m` : `${(d/1000).toFixed(2)} km`;
+  const {it,f}=cadence(d); eye.style.animationDuration=Math.max(0.3,it/900)+'s'; sweep(Math.max(0.8,3000/it)); if(armed) schedule(it,f);
   if(d<=6){ eye.style.filter='brightness(2)'; navigator.vibrate?.([20,60,20,60]); }
 }
-function onGeoErr(err){
-  const locBtn=document.getElementById('locBtn');
-  document.getElementById('geoMsg').textContent = explainGeo(err);
-  if(locBtn){locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION';}
-}
-function requestOnce(){
-  if(!navigator.geolocation){ document.getElementById('geoMsg').textContent='Geolocation not supported'; return; }
-  navigator.geolocation.getCurrentPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:0});
-}
-function startWatch(){
-  if(!navigator.geolocation) return;
-  if(watchId!==null) return;
-  watchId = navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:20000,maximumAge:2000});
-}
-['click','touchend'].forEach(ev=>document.getElementById('locBtn')?.addEventListener(ev, requestOnce, {passive:true}));
-startWatch();
+function onGeoErr(err){ geoMsg.textContent = explainGeo(err); locBtn.disabled=false; locBtn.textContent='ENABLE LOCATION'; }
+function requestOnce(){ if(!navigator.geolocation){ geoMsg.textContent='Geolocation not supported'; return; } navigator.geolocation.getCurrentPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:15000,maximumAge:0}); }
+function startWatch(){ if(!navigator.geolocation) return; navigator.geolocation.watchPosition(onGeoOK,onGeoErr,{enableHighAccuracy:true,timeout:20000,maximumAge:2000}); }
+['click','touchend'].forEach(ev=>$('locBtn').addEventListener(ev, requestOnce, {passive:true}));
 
-/* ---------- UX reminders ---------- */
-if(!isAdmin && target){ document.getElementById('labelDisplay').textContent = target.label || 'Beacon'; }
-if(location.protocol!=='https:'&&location.hostname!=='localhost'){ document.getElementById('geoMsg').textContent='⚠️ Use https:// for iOS location.'; }
+/* ---------- Boot ---------- */
+if(location.protocol!=='https:'&&location.hostname!=='localhost'){ geoMsg.textContent='⚠️ Use https:// for iOS location.'; }
 
-/* Optional CSS pulse for flash */
-const style=document.createElement('style');
-style.textContent=`.flash{filter:brightness(2)!important; box-shadow:0 0 60px rgba(255,60,60,.7),0 0 140px rgba(255,40,40,.45)!important}`;
-document.head.appendChild(style);
+(async function boot(){
+  if(isAdmin){ await initAdmin(); return; }
 
+  await loadTargets();
+
+  // Resolve target: prefer ?id=..., fallback to explicit lat/lng (for testing)
+  if(requestedId && TARGETS[requestedId]){
+    ACTIVE_TARGET = TARGETS[requestedId];
+  }else if(params.has('lat') && params.has('lng')){
+    ACTIVE_TARGET = { lat: parseFloat(params.get('lat')), lng: parseFloat(params.get('lng')), label: params.get('label')||'' };
+  }else{
+    geoMsg.textContent = 'No target ID in link.';
+  }
+
+  if(ACTIVE_TARGET){
+    $('labelDisplay').textContent = ACTIVE_TARGET.label || requestedId || 'Beacon';
+  }
+
+  startWatch();
+})();
 })();
 </script>
 </body>
 </html>
-
